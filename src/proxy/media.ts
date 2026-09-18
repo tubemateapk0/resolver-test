@@ -1,16 +1,11 @@
+import { pull } from "./pull.js";
+
 export function relayLink(base: string, target: string, referer: string): string {
   return `${base.replace(/\/$/, "")}/api/hls?${new URLSearchParams({ url: target, referer })}`;
 }
 
 export async function selectMediaPlaylist(url: string, referer: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      Referer: referer,
-    },
-  });
-  const text = await res.text();
+  const text = (await pull(url, referer)).toString("utf8");
   if (!text.includes("#EXT-X-STREAM-INF")) return url;
 
   const lines = text.split(/\r?\n/);

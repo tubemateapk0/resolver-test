@@ -1,4 +1,8 @@
+import { Readable } from "node:stream";
+
 import { relayLink } from "./media.js";
+import { pull, pullGoatSegmentStream } from "./pull.js";
+import { unwrapGoatSegment } from "./unwrap.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,8 +16,8 @@ function absUri(uri: string, base: string): string {
   return uri.startsWith("http") ? uri : new URL(uri, base).href;
 }
 
-function isPlaylist(body: string): boolean {
-  return body.includes("#EXTM3U");
+function isPlaylist(body: Buffer): boolean {
+  return body.toString("utf8", 0, Math.min(body.length, 256)).includes("#EXTM3U");
 }
 
 function rewrite(text: string, base: string, referer: string, origin: string): string {
@@ -29,6 +33,14 @@ function rewrite(text: string, base: string, referer: string, origin: string): s
       return relayLink(origin, absUri(trimmed, base), referer);
     })
     .join("\n");
+}
+
+function isGoatWebpUrl(target: string): boolean {
+  try {
+    return new URL(target).hostname.includes("sleepercdn.com");
+  } catch {
+    return false;
+  }
 }
 
 export async function proxyHls(request: Request): Promise<Response> {
@@ -47,39 +59,42 @@ export async function proxyHls(request: Request): Promise<Response> {
   }
 
   try {
-    const res = await fetch(target, {
-      headers: {
-        Referer: referer,
-        Origin: new URL(referer).origin,
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      },
-    });
-
-    if (!res.ok) {
-      return new Response(JSON.stringify({ error: `upstream ${res.status}` }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (target.includes(".m3u8")) {
+      const raw = await pull(target, referer);
+      if (!raw.length) throw new Error("empty upstream body");
+      return new Response(rewrite(raw.toString("utf8"), target, referer, url.origin), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/vnd.apple.mpegurl" },
       });
     }
 
-    const body = await res.text();
-
-    if (isPlaylist(body)) {
-      return new Response(rewrite(body, target, referer, url.origin), {
+    if (isGoatWebpUrl(target)) {
+      const { stream, contentLength } = await pullGoatSegmentStream(target, referer, request.signal);
+      return new Response(Readable.toWeb(stream) as import("node:stream/web").ReadableStream, {
         status: 200,
         headers: {
           ...corsHeaders,
-          "Content-Type": "application/vnd.apple.mpegurl",
+          "Content-Type": "video/mp2t",
+          "Content-Length": String(contentLength),
         },
       });
     }
 
-    return new Response(body, {
+    const raw = await pull(target, referer);
+    if (!raw.length) throw new Error("empty upstream body");
+    if (isPlaylist(raw)) {
+      return new Response(rewrite(raw.toString("utf8"), target, referer, url.origin), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/vnd.apple.mpegurl" },
+      });
+    }
+    const segment = unwrapGoatSegment(raw);
+    return new Response(new Uint8Array(segment), {
       status: 200,
       headers: {
         ...corsHeaders,
-        "Content-Type": res.headers.get("Content-Type") || "application/octet-stream",
+        "Content-Type": "video/mp2t",
+        "Content-Length": String(segment.length),
       },
     });
   } catch (err) {
