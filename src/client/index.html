@@ -263,14 +263,27 @@ function stopPlayback() {
   ui.video.load();
 }
 
-function startPlayback(url) {
+function startPlayback(url, relayUrl) {
   stopPlayback();
   if (Hls.isSupported()) {
-    state.hls = new Hls({ enableWorker: true, liveDurationInfinity: true, maxBufferSize: 0, maxBufferLength: 10 });
-    state.hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) showError("Playback error"); });
-    state.hls.on(Hls.Events.MANIFEST_PARSED, () => void ui.video.play().catch(() => {}));
-    state.hls.attachMedia(ui.video);
-    state.hls.loadSource(url);
+    const hls = new Hls({ enableWorker: true, liveDurationInfinity: true, maxBufferSize: 0, maxBufferLength: 10 });
+    state.hls = hls;
+    let retried = false;
+    hls.on(Hls.Events.ERROR, (_e, d) => {
+      if (d.fatal) {
+        if (!retried && relayUrl) {
+          retried = true;
+          hls.destroy();
+          state.hls = null;
+          startPlayback(relayUrl, null);
+        } else {
+          showError("Playback error");
+        }
+      }
+    });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => void ui.video.play().catch(() => {}));
+    hls.attachMedia(ui.video);
+    hls.loadSource(url);
   } else if (ui.video.canPlayType("application/vnd.apple.mpegurl")) {
     ui.video.src = url;
     void ui.video.play().catch(() => {});
@@ -485,7 +498,7 @@ async function playStream(stream) {
     ui.direct.value = result.m3u8;
     ui.proxied.value = relayUrl;
     setPlaying();
-    startPlayback(relayUrl);
+    startPlayback(result.m3u8, relayUrl);
   } catch (e) {
     setIdle();
     ui.kicker.textContent = "Pick a server";
