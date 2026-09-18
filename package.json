@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/goat/vendor','dist/goat/vendor',{recursive:true})\" && node -e \"require('fs').cpSync('src/client','dist/client',{recursive:true})\"",
