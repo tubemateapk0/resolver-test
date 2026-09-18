@@ -6,7 +6,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && xcopy /E /I /Y src\\goat\\vendor dist\\goat\\vendor",
+    "build": "tsc -p tsconfig.json && cp -r src/goat/vendor dist/goat/vendor",
     "start": "node dist/server/main.js",
     "dev": "npm run build && node dist/server/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
