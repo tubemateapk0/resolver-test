@@ -312,7 +312,7 @@ function renderMatches() {
     title.textContent = match.title;
     const meta = document.createElement("span");
     meta.className = "match__meta";
-    const sources = [...new Set(match.sources.map((s) => s.source))].map(titleCase).join(" . ");
+    const sources = [...new Set((match.sources || []).map((s) => s.source))].map(titleCase).join(" . ");
     meta.textContent = state.sportId === "all" ? `${match.category} . ${sources || "No sources"}` : sources || "No sources";
     btn.append(title, meta);
     btn.onclick = () => selectMatch(match);
@@ -402,7 +402,8 @@ function renderServers() {
 
 async function loadSports() {
   const res = await fetch("/api/sports");
-  state.sports = await res.json();
+  const data = await res.json();
+  state.sports = Array.isArray(data) ? data : [];
   renderSports();
 }
 
