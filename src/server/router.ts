@@ -35,17 +35,15 @@ export async function handleRequest(request: Request): Promise<Response> {
 
   try {
     if (url.pathname === "/api/hls") return proxyHls(request);
-    if (url.pathname === "/api/sports") return json(await handleSports());
+    if (url.pathname === "/api/sports") return handleSports();
     if (url.pathname === "/api/matches") {
-      return json(await handleMatches(url.searchParams.get("sport"), url.searchParams.get("scope")));
+      return handleMatches(url.searchParams.get("sport"), url.searchParams.get("scope"));
     }
     if (url.pathname === "/api/streams") {
-      return json(
-        await handleStreams(
+      return handleStreams(
           url.searchParams.get("matchId"),
           url.searchParams.get("source"),
           url.searchParams.get("id"),
-        ),
       );
     }
     if (url.pathname === "/api/resolve") {
