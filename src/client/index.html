@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stream Resolver</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07090c;
+      --bg-elev: #0f1318;
+      --bg-soft: #161c24;
+      --bg-hover: #1c2430;
+      --line: rgba(255,255,255,0.07);
+      --line-mid: rgba(255,255,255,0.12);
+      --text: #f4f1ea;
+      --muted: #a7b0c0;
+      --faint: #7a8496;
+      --accent: #2fd3c2;
+      --accent-hi: #8af0e4;
+      --accent-dim: rgba(47,211,194,0.14);
+      --accent-line: rgba(47,211,194,0.45);
+      --ok: #3ecf8e;
+      --err: #ff6b7a;
+      --r: 14px;
+      --ease: cubic-bezier(0.22,1,0.36,1);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100dvh; }
+    body {
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      background: radial-gradient(ellipse 90% 55% at 8% -10%, rgba(47,211,194,0.11), transparent 58%),
+        linear-gradient(180deg, #0b1216 0%, var(--bg) 42%, #050708 100%);
+      background-attachment: fixed;
+    }
+    button, input { font-family: inherit; }
+
+    .app { width: min(1400px, 100%); margin: 0 auto; padding: 20px; display: grid; gap: 16px; min-height: 100dvh; grid-template-rows: auto auto 1fr; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .topbar__brand { display: flex; align-items: baseline; gap: 10px; }
+    .topbar__logo { font-weight: 800; font-size: 1.8rem; color: var(--accent); }
+    .topbar__tag { font-weight: 600; font-size: 0.8rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); }
+    .topbar__aside { display: flex; align-items: center; gap: 10px; }
+    .status { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-mid); background: rgba(255,255,255,0.03); }
+    .status__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(62,207,142,0.16); }
+    .status.is-loading .status__dot { background: var(--accent); animation: pulse 1s var(--ease) infinite; }
+    .status.is-error .status__dot { background: var(--err); }
+    @keyframes pulse { 50% { opacity: 0.35; } }
+    .status__text { font-weight: 600; font-size: 0.88rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .btn { appearance: none; border: 1px solid var(--line-mid); background: var(--bg-soft); color: var(--text); border-radius: 10px; padding: 0 16px; height: 38px; font-weight: 600; font-size: 0.88rem; cursor: pointer; white-space: nowrap; transition: all 0.2s var(--ease); }
+    .btn:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-dim); color: var(--accent-hi); }
+    .btn:disabled { opacity: 0.4; cursor: wait; }
+    .btn--sm { height: 32px; padding: 0 10px; font-size: 0.8rem; }
+    .btn--copy { background: transparent; }
+    .btn.ok { color: var(--ok); border-color: rgba(62,207,142,0.4); background: rgba(62,207,142,0.16); }
+
+    .sports { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; scrollbar-width: none; }
+    .sports::-webkit-scrollbar { display: none; }
+    .sports__btn { appearance: none; flex: 0 0 auto; border: 1px solid transparent; background: transparent; color: var(--muted); border-radius: 999px; padding: 8px 16px; font-weight: 500; font-size: 0.92rem; cursor: pointer; transition: all 0.2s var(--ease); }
+    .sports__btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .sports__btn.is-active { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent-hi); font-weight: 600; }
+
+    .banner { margin: 0; padding: 12px 16px; border-radius: var(--r); background: rgba(255,107,122,0.12); border: 1px solid rgba(255,107,122,0.28); color: #ffb4bd; font-weight: 500; }
+
+    .workspace { display: grid; grid-template-columns: 320px minmax(0,1fr) 300px; gap: 16px; min-height: 0; }
+    .panel { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg-elev); overflow: hidden; }
+    .panel__head { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .panel__label { font-weight: 700; font-size: 0.88rem; }
+    .panel__hint { font-weight: 500; font-size: 0.75rem; color: var(--faint); }
+    .panel__count { margin-left: auto; font-weight: 700; font-size: 0.92rem; color: var(--accent-hi); font-variant-numeric: tabular-nums; }
+    .panel__empty { margin: auto; padding: 30px 20px; text-align: center; font-weight: 500; color: var(--faint); }
+    .matches { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; scrollbar-width: thin; }
+    .match { width: 100%; appearance: none; border: 1px solid transparent; border-radius: 12px; background: transparent; color: inherit; text-align: left; padding: 12px 14px; cursor: pointer; display: grid; gap: 4px; transition: all 0.18s var(--ease); }
+    .match:hover:not(:disabled) { background: var(--bg-hover); transform: translateX(2px); }
+    .match.is-active { background: var(--accent-dim); border-color: var(--accent-line); transform: none; }
+    .match:disabled { opacity: 0.5; cursor: wait; }
+    .match__title { font-weight: 600; font-size: 0.98rem; line-height: 1.3; }
+    .match.is-active .match__title { color: var(--accent-hi); }
+    .match__meta { font-weight: 500; font-size: 0.8rem; color: var(--faint); }
+
+    .stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .stage__bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; min-height: 44px; }
+    .stage__titles { min-width: 0; }
+    .stage__kicker { margin: 0; font-weight: 600; font-size: 0.76rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+    .stage__title { margin: 0; font-weight: 700; font-size: 1.4rem; min-width: 0; overflow-wrap: anywhere; }
+    .stage__shell { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg-elev); overflow: hidden; flex: 1; }
+    .screen { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; }
+    .screen__idle { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; text-align: center; padding: 32px;
+      background: radial-gradient(ellipse 58% 48% at 50% 44%, rgba(47,211,194,0.14), transparent 72%), linear-gradient(160deg, #101820, #070b0d); }
+    .screen__idle-brand { margin: 0; font-weight: 800; font-size: 2.4rem; color: var(--accent); }
+    .screen__idle-copy { margin: 0; font-weight: 500; font-size: 1rem; color: var(--muted); }
+    .screen__video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .screen.is-active .screen__idle { display: none; }
+    .exports { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding: 12px 14px; border-top: 1px solid var(--line); background: rgba(0,0,0,0.28); }
+    .export { display: grid; gap: 4px; min-width: 0; }
+    .export__k { font-weight: 600; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+    .export__row { display: flex; gap: 6px; }
+    .export__row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: rgba(0,0,0,0.4); color: #c4cad6; font-size: 0.8rem; padding: 7px 10px; height: 34px; overflow: hidden; text-overflow: ellipsis; }
+    .export__row .btn { height: 34px; padding: 0 10px; font-size: 0.8rem; }
+
+    .streams__grid { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; scrollbar-width: thin; }
+    .source { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.025); }
+    .source__head { display: flex; align-items: center; justify-content: space-between; }
+    .source__name { margin: 0; font-weight: 700; font-size: 0.95rem; }
+    .source__count { font-weight: 700; font-size: 0.75rem; color: var(--muted); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); }
+    .source__desc { margin: 0; font-size: 0.8rem; color: var(--faint); }
+    .source__list { display: flex; flex-direction: column; gap: 6px; }
+    .chip { appearance: none; display: flex; align-items: center; gap: 10px; width: 100%; border: 1px solid var(--line-mid); background: rgba(255,255,255,0.035); color: var(--muted); border-radius: 10px; padding: 10px; text-align: left; cursor: pointer; transition: all 0.18s var(--ease); }
+    .chip:hover:not(:disabled) { color: var(--text); border-color: var(--accent-line); }
+    .chip.is-active { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent-hi); }
+    .chip:disabled { opacity: 0.5; cursor: wait; }
+    .chip__badge { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 24px; padding: 0 6px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; background: rgba(255,255,255,0.09); color: var(--text); }
+    .chip__badge.is-hd { background: var(--accent-dim); color: var(--accent-hi); }
+    .chip__badge.is-sd { background: rgba(255,255,255,0.07); color: var(--muted); }
+    .chip__title { font-weight: 600; font-size: 0.88rem; }
+    .chip__meta { flex: 1; font-size: 0.78rem; color: var(--faint); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    @media (max-width: 1040px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(240px,40vh) minmax(220px,34vh); }
+      .stage { order: -1; }
+    }
+    @media (max-width: 720px) {
+      .exports { grid-template-columns: 1fr; }
+      .topbar { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar__brand">
+        <span class="topbar__logo">Stream Resolver</span>
+        <span class="topbar__tag">Live</span>
+      </div>
+      <div class="topbar__aside">
+        <div class="status" id="status">
+          <span class="status__dot"></span>
+          <span id="live-meta" class="status__text">Loading...</span>
+        </div>
+        <button type="button" id="refresh-button" class="btn">Refresh</button>
+      </div>
+    </header>
+
+    <nav id="sport-tabs" class="sports"></nav>
+    <p id="error-message" class="banner" hidden></p>
+
+    <div class="workspace">
+      <aside class="panel" aria-label="Live matches">
+        <div class="panel__head">
+          <span class="panel__label">Matches</span>
+          <span class="panel__hint">Pick one</span>
+          <span id="match-count" class="panel__count">0</span>
+        </div>
+        <ul id="match-list" class="matches"></ul>
+      </aside>
+
+      <section class="stage" aria-label="Player">
+        <div class="stage__bar">
+          <div class="stage__titles">
+            <p id="stream-kicker" class="stage__kicker">Ready</p>
+            <h1 id="stream-title" class="stage__title">Choose a Match</h1>
+          </div>
+        </div>
+        <div class="stage__shell">
+          <div class="screen" id="screen">
+            <div class="screen__idle">
+              <p class="screen__idle-brand">Stream Resolver</p>
+              <p class="screen__idle-copy">Pick a match on the left, then a server on the right.</p>
+            </div>
+            <video id="video-element" class="screen__video" controls playsinline autoplay hidden></video>
+          </div>
+          <div id="exports" class="exports" hidden>
+            <div class="export">
+              <span class="export__k">Direct m3u8</span>
+              <div class="export__row">
+                <input id="export-direct-url" readonly>
+                <button type="button" class="btn btn--sm btn--copy" data-copy="export-direct-url">Copy</button>
+              </div>
+            </div>
+            <div class="export">
+              <span class="export__k">Proxied</span>
+              <div class="export__row">
+                <input id="export-proxied-url" readonly>
+                <button type="button" class="btn btn--sm btn--copy" data-copy="export-proxied-url">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel" aria-label="Stream servers">
+        <div class="panel__head">
+          <span class="panel__label">Servers</span>
+          <span class="panel__hint">Then play</span>
+          <span id="stream-count" class="panel__count">0</span>
+        </div>
+        <div id="stream-empty" class="panel__empty">Pick a match to load servers.</div>
+        <div id="stream-list" class="streams__grid" hidden></div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+const state = {
+  sportId: "all",
+  sports: [],
+  matches: [],
+  streams: [],
+  activeMatchId: null,
+  activeStreamKey: null,
+  loading: false,
+  resolving: false,
+  hls: null,
+};
+
+const $ = (id) => document.getElementById(id);
+const ui = {
+  sports: $("sport-tabs"),
+  refresh: $("refresh-button"),
+  liveMeta: $("live-meta"),
+  status: $("status"),
+  matches: $("match-list"),
+  matchCount: $("match-count"),
+  kicker: $("stream-kicker"),
+  title: $("stream-title"),
+  servers: $("stream-list"),
+  serversEmpty: $("stream-empty"),
+  serverCount: $("stream-count"),
+  screen: $("screen"),
+  video: $("video-element"),
+  exports: $("exports"),
+  error: $("error-message"),
+  direct: $("export-direct-url"),
+  proxied: $("export-proxied-url"),
+};
+
+const streamKey = (s) => `${s.source}:${s.id}:${s.streamNo}`;
+const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const sourceLabel = (s) => s.sourceName || titleCase(s.source);
+
+function showError(msg) { ui.error.textContent = msg; ui.error.hidden = false; }
+function clearError() { ui.error.hidden = true; ui.error.textContent = ""; }
+function setIdle() {
+  ui.screen.classList.remove("is-active");
+  ui.video.hidden = true;
+  ui.exports.hidden = true;
+  ui.kicker.textContent = "Ready";
+  ui.title.textContent = "Choose a Match";
+  ui.direct.value = ui.proxied.value = "";
+}
+function setPlaying() { ui.screen.classList.add("is-active"); ui.video.hidden = false; ui.exports.hidden = false; }
+
+function stopPlayback() {
+  state.hls?.destroy();
+  state.hls = null;
+  ui.video.pause();
+  ui.video.removeAttribute("src");
+  ui.video.load();
+}
+
+function startPlayback(url) {
+  stopPlayback();
+  if (Hls.isSupported()) {
+    state.hls = new Hls({ enableWorker: true, liveDurationInfinity: true, maxBufferSize: 0, maxBufferLength: 10 });
+    state.hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) showError("Playback error"); });
+    state.hls.on(Hls.Events.MANIFEST_PARSED, () => void ui.video.play().catch(() => {}));
+    state.hls.attachMedia(ui.video);
+    state.hls.loadSource(url);
+  } else if (ui.video.canPlayType("application/vnd.apple.mpegurl")) {
+    ui.video.src = url;
+    void ui.video.play().catch(() => {});
+  } else {
+    showError("HLS not supported in this browser");
+  }
+}
+
+function renderSports() {
+  const tabs = [{ id: "all", name: "All" }, ...state.sports];
+  ui.sports.replaceChildren(...tabs.map((sport) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `sports__btn${sport.id === state.sportId ? " is-active" : ""}`;
+    btn.textContent = sport.name;
+    btn.onclick = () => {
+      state.sportId = sport.id;
+      state.activeMatchId = null;
+      state.activeStreamKey = null;
+      state.streams = [];
+      renderServers();
+      renderSports();
+      loadMatches();
+    };
+    return btn;
+  }));
+}
+
+function renderMatches() {
+  ui.matchCount.textContent = String(state.matches.length);
+  ui.matches.replaceChildren(...state.matches.map((match) => {
+    const item = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `match${match.id === state.activeMatchId ? " is-active" : ""}`;
+    btn.disabled = state.resolving;
+    const title = document.createElement("span");
+    title.className = "match__title";
+    title.textContent = match.title;
+    const meta = document.createElement("span");
+    meta.className = "match__meta";
+    const sources = [...new Set(match.sources.map((s) => s.source))].map(titleCase).join(" . ");
+    meta.textContent = state.sportId === "all" ? `${match.category} . ${sources || "No sources"}` : sources || "No sources";
+    btn.append(title, meta);
+    btn.onclick = () => selectMatch(match);
+    item.append(btn);
+    return item;
+  }));
+  if (!state.matches.length && !state.loading) {
+    const empty = document.createElement("li");
+    empty.className = "panel__empty";
+    empty.textContent = "No matches for this sport right now.";
+    ui.matches.append(empty);
+  }
+}
+
+function groupBySource(streams) {
+  const order = [];
+  const map = new Map();
+  for (const s of streams) {
+    if (!map.has(s.source)) { map.set(s.source, []); order.push(s.source); }
+    map.get(s.source).push(s);
+  }
+  return order.map((source) => {
+    const items = map.get(source).sort((a, b) => Number(b.hd) - Number(a.hd) || a.streamNo - b.streamNo);
+    return { name: sourceLabel(items[0]), description: items[0].sourceDescription || "", streams: items };
+  });
+}
+
+function renderServers() {
+  ui.serverCount.textContent = String(state.streams.length);
+  if (!state.streams.length) {
+    ui.servers.hidden = true;
+    ui.servers.replaceChildren();
+    ui.serversEmpty.hidden = false;
+    ui.serversEmpty.textContent = state.activeMatchId ? "No servers for this match." : "Pick a match to load servers.";
+    return;
+  }
+  ui.serversEmpty.hidden = true;
+  ui.servers.hidden = false;
+  ui.servers.replaceChildren(...groupBySource(state.streams).map((group) => {
+    const box = document.createElement("section");
+    box.className = "source";
+    const head = document.createElement("div");
+    head.className = "source__head";
+    const name = document.createElement("h3");
+    name.className = "source__name";
+    name.textContent = group.name;
+    const count = document.createElement("span");
+    count.className = "source__count";
+    count.textContent = String(group.streams.length);
+    head.append(name, count);
+    box.append(head);
+    if (group.description) {
+      const desc = document.createElement("p");
+      desc.className = "source__desc";
+      desc.textContent = group.description;
+      box.append(desc);
+    }
+    const list = document.createElement("div");
+    list.className = "source__list";
+    list.append(...group.streams.map((stream) => {
+      const key = streamKey(stream);
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = `chip${key === state.activeStreamKey ? " is-active" : ""}`;
+      chip.disabled = state.resolving;
+      const badge = document.createElement("span");
+      badge.className = `chip__badge ${stream.hd ? "is-hd" : "is-sd"}`;
+      badge.textContent = stream.hd ? "HD" : "SD";
+      const t = document.createElement("span");
+      t.className = "chip__title";
+      t.textContent = `Stream ${stream.streamNo}`;
+      chip.append(badge, t);
+      const metaParts = [stream.viewers > 0 ? stream.viewers.toLocaleString() : "", stream.language].filter(Boolean);
+      if (metaParts.length) {
+        const m = document.createElement("span");
+        m.className = "chip__meta";
+        m.textContent = metaParts.join(" . ");
+        chip.append(m);
+      }
+      chip.onclick = () => playStream(stream);
+      return chip;
+    }));
+    box.append(list);
+    return box;
+  }));
+}
+
+async function loadSports() {
+  const res = await fetch("/api/sports");
+  state.sports = await res.json();
+  renderSports();
+}
+
+async function loadMatches() {
+  state.loading = true;
+  ui.refresh.disabled = true;
+  ui.status.className = "status is-loading";
+  ui.liveMeta.textContent = "Loading...";
+  clearError();
+  renderMatches();
+  try {
+    const res = await fetch(`/api/matches?sport=${encodeURIComponent(state.sportId)}&scope=popular`);
+    const matches = await res.json();
+    state.matches = Array.isArray(matches) ? matches : [];
+    ui.status.className = "status";
+    ui.liveMeta.textContent = `${state.matches.length} matches`;
+  } catch (e) {
+    state.matches = [];
+    ui.status.className = "status is-error";
+    ui.liveMeta.textContent = "Failed";
+    showError(e.message || "Failed to load matches");
+  } finally {
+    state.loading = false;
+    ui.refresh.disabled = false;
+    renderMatches();
+  }
+}
+
+async function selectMatch(match) {
+  if (state.resolving) return;
+  state.activeMatchId = match.id;
+  state.activeStreamKey = null;
+  clearError();
+  stopPlayback();
+  setIdle();
+  ui.kicker.textContent = "Pick a server";
+  ui.title.textContent = match.title;
+  renderMatches();
+  ui.status.className = "status is-loading";
+  ui.liveMeta.textContent = "Streams...";
+  try {
+    const res = await fetch(`/api/streams?matchId=${encodeURIComponent(match.id)}`);
+    const result = await res.json();
+    state.streams = result.streams || [];
+    renderServers();
+    ui.status.className = "status";
+    ui.liveMeta.textContent = `${state.matches.length} live`;
+    if (!state.streams.length) showError("No active streams for this match.");
+  } catch (e) {
+    state.streams = [];
+    renderServers();
+    ui.status.className = "status is-error";
+    ui.liveMeta.textContent = "Failed";
+    showError(e.message || "Streams failed");
+  }
+}
+
+async function playStream(stream) {
+  if (state.resolving) return;
+  state.resolving = true;
+  state.activeStreamKey = streamKey(stream);
+  clearError();
+  stopPlayback();
+  setIdle();
+  ui.kicker.textContent = `${sourceLabel(stream)} . ${stream.hd ? "HD" : "SD"} . Stream ${stream.streamNo}`;
+  ui.title.textContent = stream.title || ui.title.textContent || "Stream";
+  renderMatches();
+  renderServers();
+  try {
+    const res = await fetch("/api/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchId: stream.matchId || state.activeMatchId, source: stream.source, stream: stream.streamNo }),
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error || "Resolve failed");
+    if (result.title) ui.title.textContent = result.title;
+    const relayUrl = `${location.origin}/api/hls?url=${encodeURIComponent(result.m3u8)}&referer=${encodeURIComponent(result.referer)}`;
+    ui.direct.value = result.m3u8;
+    ui.proxied.value = relayUrl;
+    setPlaying();
+    startPlayback(relayUrl);
+  } catch (e) {
+    setIdle();
+    ui.kicker.textContent = "Pick a server";
+    ui.title.textContent = "Choose a Match";
+    showError(e.message || "Resolve failed");
+  } finally {
+    state.resolving = false;
+    renderMatches();
+    renderServers();
+  }
+}
+
+document.querySelectorAll("[data-copy]").forEach((btn) => {
+  btn.onclick = async () => {
+    const field = document.getElementById(btn.dataset.copy);
+    if (!field?.value) return;
+    await navigator.clipboard.writeText(field.value);
+    const label = btn.textContent;
+    btn.textContent = "Copied";
+    btn.classList.add("ok");
+    setTimeout(() => { btn.textContent = label; btn.classList.remove("ok"); }, 1100);
+  };
+});
+
+ui.refresh.onclick = () => loadMatches();
+setIdle();
+renderServers();
+
+(async () => {
+  try {
+    await loadSports();
+    await loadMatches();
+  } catch (e) {
+    showError(e.message || "Bootstrap failed");
+  }
+})();
+</script>
+</body>
+</html>
